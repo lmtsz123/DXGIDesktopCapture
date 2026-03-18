@@ -7,6 +7,7 @@
 #include <string>
 #include <memory>
 #include <vector>
+#include <cstdint>
 
 class MouseHandler;
 
@@ -18,6 +19,8 @@ public:
     bool Initialize();
     bool CaptureFrame();
     void Cleanup();
+    bool HasNewFrame() const { return m_hasNewFrame; }
+    bool CopyCapturedFrameToBuffer(std::vector<uint8_t>& outBgra) const;
 
     // 获取捕获的纹理
     ID3D11Texture2D* GetCapturedTexture() const { return m_capturedTexture.Get(); }
@@ -29,6 +32,7 @@ public:
 private:
     bool InitializeD3D();
     bool InitializeDXGI();
+    bool RecoverFromAccessLost();
     bool ProcessFrame(IDXGIResource* resource);
     void SaveTextureToFile(ID3D11Texture2D* texture, const std::wstring& filename);
 
@@ -51,4 +55,5 @@ private:
     DXGI_OUTPUT_DESC m_outputDesc;
 
     bool m_initialized;
+    bool m_hasNewFrame;
 };

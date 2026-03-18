@@ -3,11 +3,22 @@
 #include <iostream>
 #include <comdef.h>
 #include <wrl/client.h>
+#include <cstring>
 
 using namespace Microsoft::WRL;
 
+namespace {
+void LogAcquireNextFrameError(const wchar_t* context, HRESULT hr) {
+    _com_error err(hr);
+    std::wcerr << context
+               << L" HRESULT=0x" << std::hex << static_cast<unsigned int>(hr) << std::dec
+               << L", message=" << err.ErrorMessage()
+               << std::endl;
+}
+}
+
 DXGICapture::DXGICapture() 
-    : m_width(0), m_height(0), m_initialized(false) {
+    : m_width(0), m_height(0), m_initialized(false), m_hasNewFrame(false) {
     m_mouseHandler = std::make_unique<MouseHandler>();
 }
 
@@ -117,6 +128,7 @@ bool DXGICapture::InitializeDXGI() {
 
 bool DXGICapture::CaptureFrame() {
     if (!m_initialized) {
+        m_hasNewFrame = false;
         return false;
     }
 
@@ -127,9 +139,18 @@ bool DXGICapture::CaptureFrame() {
     // 获取下一帧
     hr = m_duplication->AcquireNextFrame(100, &frameInfo, &resource);
     if (hr == DXGI_ERROR_WAIT_TIMEOUT) {
+        m_hasNewFrame = false;
         return true; // 没有新帧，这是正常的
     }
     if (FAILED(hr)) {
+        m_hasNewFrame = false;
+        LogAcquireNextFrameError(L"AcquireNextFrame failed.", hr);
+
+        if (hr == DXGI_ERROR_ACCESS_LOST) {
+            std::wcerr << L"Desktop duplication access lost, attempting to recover..." << std::endl;
+            return RecoverFromAccessLost();
+        }
+
         return false;
     }
 
@@ -144,7 +165,30 @@ bool DXGICapture::CaptureFrame() {
     // 释放帧
     m_duplication->ReleaseFrame();
 
+    m_hasNewFrame = result;
     return result;
+}
+
+bool DXGICapture::RecoverFromAccessLost() {
+    // Reset objects tied to previous duplication session.
+    m_duplication.Reset();
+    m_output1.Reset();
+    m_stagingTexture.Reset();
+    m_capturedTexture.Reset();
+
+    if (!InitializeDXGI()) {
+        std::wcerr << L"RecoverFromAccessLost: failed to recreate DXGI duplication." << std::endl;
+        return false;
+    }
+
+    m_mouseHandler->Cleanup();
+    if (!m_mouseHandler->Initialize(m_device.Get(), m_context.Get(), m_width, m_height)) {
+        std::wcerr << L"RecoverFromAccessLost: failed to reinitialize mouse handler." << std::endl;
+        return false;
+    }
+
+    std::wcerr << L"RecoverFromAccessLost: desktop duplication recovered." << std::endl;
+    return true;
 }
 
 bool DXGICapture::ProcessFrame(IDXGIResource* resource) {
@@ -183,6 +227,34 @@ bool DXGICapture::ProcessFrame(IDXGIResource* resource) {
     return true;
 }
 
+bool DXGICapture::CopyCapturedFrameToBuffer(std::vector<uint8_t>& outBgra) const {
+    if (!m_capturedTexture || !m_stagingTexture || !m_context) {
+        return false;
+    }
+
+    m_context->CopyResource(m_stagingTexture.Get(), m_capturedTexture.Get());
+
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    HRESULT hr = m_context->Map(m_stagingTexture.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    const UINT dstStride = static_cast<UINT>(m_width) * 4;
+    const size_t requiredSize = static_cast<size_t>(dstStride) * static_cast<size_t>(m_height);
+    outBgra.resize(requiredSize);
+
+    const auto* src = static_cast<const uint8_t*>(mapped.pData);
+    for (int y = 0; y < m_height; ++y) {
+        const size_t srcOffset = static_cast<size_t>(y) * static_cast<size_t>(mapped.RowPitch);
+        const size_t dstOffset = static_cast<size_t>(y) * static_cast<size_t>(dstStride);
+        memcpy(outBgra.data() + dstOffset, src + srcOffset, dstStride);
+    }
+
+    m_context->Unmap(m_stagingTexture.Get(), 0);
+    return true;
+}
+
 void DXGICapture::SaveTextureToFile(ID3D11Texture2D* texture, const std::wstring& filename) {
     // 复制到暂存纹理
     m_context->CopyResource(m_stagingTexture.Get(), texture);
@@ -214,4 +286,5 @@ void DXGICapture::Cleanup() {
     m_device.Reset();
     
     m_initialized = false;
+    m_hasNewFrame = false;
 }

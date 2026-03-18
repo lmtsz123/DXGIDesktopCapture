@@ -26,3 +26,23 @@
 ```bash
 git clone <your-repo-url>
 cd DXGIDesktopCapture
+```
+
+2. 生成并编译（Visual Studio）：
+```bash
+cmake -S . -B build -G "Visual Studio 18 2026" -A x64
+cmake --build build --config Release
+```
+
+3. 运行：
+```bash
+build/bin/Release/DXGIDesktopCapture.exe
+```
+
+程序运行后会在当前工作目录生成 `capture.mp4`。
+
+## MP4 说明
+
+- 当前已实现 MP4 录制输出（H.264 in MP4），使用 Windows Media Foundation 编码与封装。
+- 已预留 `mp4v2` 源码引入入口：`third_party/mp4v2`。
+- 如果你需要启用 `mp4v2`，将其源码放到 `third_party/mp4v2`（包含 `CMakeLists.txt`）即可被 CMake 自动检测并尝试链接。

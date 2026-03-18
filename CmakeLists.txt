@@ -7,11 +7,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 设置输出目录
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+option(ENABLE_MP4V2 "Enable mp4v2 source integration from third_party/mp4v2" ON)
+
 # 添加可执行文件
 add_executable(DXGIDesktopCapture
     src/main.cpp
     src/DXGICapture.cpp
     src/MouseHandler.cpp
+    src/Mp4Recorder.cpp
 )
 
 # 链接库
@@ -19,7 +22,24 @@ target_link_libraries(DXGIDesktopCapture
     d3d11
     dxgi
     d3dcompiler
+    mfplat
+    mfreadwrite
+    mfuuid
+    ole32
 )
+
+if(ENABLE_MP4V2)
+    set(MP4V2_SOURCE_DIR "${CMAKE_SOURCE_DIR}/third_party/mp4v2")
+    if(EXISTS "${MP4V2_SOURCE_DIR}/CMakeLists.txt")
+        add_subdirectory("${MP4V2_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/third_party/mp4v2")
+        if(TARGET mp4v2)
+            target_link_libraries(DXGIDesktopCapture mp4v2)
+            target_compile_definitions(DXGIDesktopCapture PRIVATE DXGI_CAPTURE_WITH_MP4V2=1)
+        endif()
+    else()
+        message(WARNING "mp4v2 source not found at third_party/mp4v2. MP4 muxing by mp4v2 is disabled.")
+    endif()
+endif()
 
 # 设置编译选项
 if(MSVC)
