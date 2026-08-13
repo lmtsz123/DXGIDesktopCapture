@@ -1,48 +1,96 @@
-# DXGI Desktop Capture Demo
+# DXGIDesktopCapture
 
-这是一个完整的Windows桌面捕获demo，使用DXGI API实现高性能的桌面录制功能。
+Windows 桌面采集 Demo：用 **DXGI Desktop Duplication** 抓主屏，把鼠标叠到画面上，再经 **Media Foundation** 写成 H.264 MP4。
 
-## 功能特性
+按 `ESC` 结束录制，当前工作目录会生成 `capture.mp4`。
 
-- 使用DXGI Desktop Duplication API进行高效桌面捕获
-- 完整的鼠标捕获和渲染支持
-- 支持所有类型的鼠标指针：
-  - DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MONOCHROME (单色)
-  - DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR (彩色)
-  - DXGI_OUTDUPL_POINTER_SHAPE_TYPE_MASKED_COLOR (带掩码彩色)
-- D3D11渲染管线
-- CMake构建系统
+## 功能
 
-## 系统要求
+- DXGI Desktop Duplication 采集主显示器（`EnumOutputs(0)`）
+- 鼠标指针叠加：单色 / 彩色 / Masked Color
+- D3D11 纹理管线，staging 回读为 BGRA
+- Media Foundation SinkWriter 输出 H.264 MP4（目标 30 fps）
+- 会话丢失时自动恢复（`DXGI_ERROR_ACCESS_LOST`，例如分辨率变化、锁屏、UAC）
 
-- Windows 8/10/11
-- Visual Studio 2019/2022 或 MinGW-w64
+## 环境
+
+- Windows 8 / 10 / 11（需要桌面会话，远程/服务会话通常不行）
+- DirectX 11 显卡
 - CMake 3.16+
-- DirectX 11支持的显卡
+- C++17 编译器：Visual Studio 2019/2022，或 MinGW-w64
+- 链接：`d3d11` `dxgi` `d3dcompiler` `mfplat` `mfreadwrite` `mfuuid` `ole32`
 
-## 编译说明
+## 编译
 
-1. 克隆项目：
+仓库根目录的 CMake 文件目前叫 `CmakeLists.txt`（Windows 上大小写不敏感，可以直接用）。
+
+**Visual Studio 2022：**
+
 ```bash
-git clone <your-repo-url>
-cd DXGIDesktopCapture
-```
-
-2. 生成并编译（Visual Studio）：
-```bash
-cmake -S . -B build -G "Visual Studio 18 2026" -A x64
+cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
 ```
 
-3. 运行：
+**Visual Studio 2019：** 把生成器换成 `"Visual Studio 16 2019"`。
+
+**Ninja / MinGW：**
+
+```bash
+cmake -S . -B build -G Ninja
+cmake --build build
+```
+
+可执行文件在 `build/bin/Release/DXGIDesktopCapture.exe`（VS 多配置）或 `build/bin/DXGIDesktopCapture.exe`（单配置）。
+
+## 运行
+
 ```bash
 build/bin/Release/DXGIDesktopCapture.exe
 ```
 
-程序运行后会在当前工作目录生成 `capture.mp4`。
+- 控制台会打印分辨率和大约每秒写入的帧数
+- 输出文件：运行时工作目录下的 `capture.mp4`
+- `ESC` 停止并 finalize 文件
 
-## MP4 说明
+建议在资源管理器里双击运行，或 `cd` 到想保存视频的目录再启动，避免文件写到构建目录里。
 
-- 当前已实现 MP4 录制输出（H.264 in MP4），使用 Windows Media Foundation 编码与封装。
-- 已预留 `mp4v2` 源码引入入口：`third_party/mp4v2`。
-- 如果你需要启用 `mp4v2`，将其源码放到 `third_party/mp4v2`（包含 `CMakeLists.txt`）即可被 CMake 自动检测并尝试链接。
+## 结构
+
+```
+src/main.cpp            入口：COM 初始化、采集循环、ESC 退出
+src/DXGICapture.*       D3D11 设备、桌面复制、ACCESS_LOST 恢复、BGRA 回读
+src/MouseHandler.*      指针形状更新，绘制到采集纹理
+src/Mp4Recorder.*       MF SinkWriter：RGB32 → H.264 MP4
+third_party/mp4v2/      可选 mp4v2 源码占位，默认未接入编码器
+CmakeLists.txt          工程文件
+```
+
+数据流：`AcquireNextFrame` → 复制桌面纹理 → 画鼠标 → staging 回读 BGRA → `Mp4Recorder::WriteFrameBGRA`。
+
+## mp4v2（可选，目前未真正使用）
+
+CMake 有 `ENABLE_MP4V2`（默认 ON），但 **当前编码器走的是 Media Foundation**。`Mp4Recorder` 没有调用 mp4v2。只有把带 `CMakeLists.txt` 的 mp4v2 源码放到 `third_party/mp4v2` 时才会尝试链接，例如：
+
+```bash
+git clone https://github.com/TechSmith/mp4v2.git third_party/mp4v2
+```
+
+没有这份源码时 CMake 只会警告，不影响 MF 录制。
+
+关掉探测：
+
+```bash
+cmake -S . -B build -DENABLE_MP4V2=OFF
+```
+
+## 限制
+
+- 只采主屏，没有音频
+- 帧经过 CPU 回读，不是 GPU 直出编码
+- 目标 30 fps，循环里还 sleep 了约 16 ms，实际帧率取决于桌面更新和编码
+- 没有预览窗口
+- `SaveTextureToFile` 仍是空实现
+
+## 许可
+
+仓库尚未添加 LICENSE。

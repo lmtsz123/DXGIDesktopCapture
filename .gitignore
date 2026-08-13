@@ -1,2 +1,7 @@
 .vscode
+.vs
 build
+out
+CMakeUserPresets.json
+*.user
+capture.mp4
